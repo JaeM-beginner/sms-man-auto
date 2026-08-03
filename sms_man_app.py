@@ -144,7 +144,15 @@ class SmsManClient:
             timeout=self.timeout,
         )
         if response.status_code != 200:
-            raise ApiError(f"SMS-Man HTTP {response.status_code}")
+            message = f"SMS-Man HTTP {response.status_code}"
+            body = getattr(response, "body", "").strip()
+            if body:
+                try:
+                    detail = str(api_error(response.json()))
+                except ApiError:
+                    detail = " ".join(body.split())[:200]
+                message = f"{message}: {detail}"
+            raise ApiError(message)
         return response.json()
 
     def get_number(self, *, application_id: str, country_id: str) -> Activation:

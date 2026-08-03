@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from sms_man_app import ApiError, SmsManClient, parse_get_number_response, parse_get_sms_response
+from sms_man_app import ApiError, HttpResponse, SmsManClient, parse_get_number_response, parse_get_sms_response
 
 
 class ParseResponseTests(unittest.TestCase):
@@ -65,6 +65,17 @@ class ClientTests(unittest.TestCase):
             params={"token": "secret", "application_id": "297", "country_id": "140"},
             timeout=15.0,
         )
+
+    def test_includes_api_error_detail_for_http_failure(self):
+        session = Mock()
+        session.get.return_value = HttpResponse(
+            400,
+            '{"success":false,"error_code":"wrong_application_id","error_msg":"Wrong application ID!"}',
+        )
+        client = SmsManClient("secret", session=session)
+
+        with self.assertRaisesRegex(ApiError, "SMS-Man HTTP 400: Wrong application ID"):
+            client.get_number(application_id="297", country_id="140")
 
     def test_sets_status_with_activation_id(self):
         session = Mock()
