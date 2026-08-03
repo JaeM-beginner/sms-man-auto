@@ -271,8 +271,18 @@ def main() -> None:
 
     root = tk.Tk()
     root.title("SMS-Man 자동 발급")
-    root.resizable(False, False)
+    root.minsize(720, 620)
+    root.geometry("800x720")
     root.columnconfigure(0, weight=1)
+    root.rowconfigure(0, weight=1)
+
+    style = ttk.Style(root)
+    style.configure("App.TFrame", background="#eef4fb")
+    style.configure("Card.TLabelframe", background="#ffffff", bordercolor="#cbd8e6", relief="solid")
+    style.configure("Card.TLabelframe.Label", background="#ffffff", foreground="#163a63", font=("Segoe UI", 11, "bold"))
+    style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"))
+    style.configure("Result.TLabel", font=("Segoe UI", 13, "bold"), foreground="#163a63", background="#ffffff")
+    style.configure("Code.TLabel", font=("Segoe UI", 20, "bold"), foreground="#0b6b3a", background="#ffffff")
 
     events: queue.Queue[tuple[str, str]] = queue.Queue()
     poller: Poller | None = None
@@ -285,30 +295,63 @@ def main() -> None:
     code = tk.StringVar(value="—")
     status = tk.StringVar(value="API 토큰, 애플리케이션 ID, 국가 ID를 입력하세요.")
 
-    frame = ttk.Frame(root, padding=16)
-    frame.grid(sticky="nsew")
-    frame.columnconfigure(1, weight=1)
+    app = ttk.Frame(root, style="App.TFrame", padding=16)
+    app.grid(sticky="nsew")
+    app.columnconfigure(0, weight=1)
+    app.rowconfigure(3, weight=1)
+
+    header = tk.Frame(app, background="#0757a8", padx=18, pady=14)
+    header.grid(row=0, column=0, sticky="ew")
+    tk.Label(header, text="SMS-Man 자동 발급", background="#0757a8", foreground="white", font=("Segoe UI", 18, "bold")).pack(anchor="w")
+    tk.Label(header, text="토큰은 이 창에서만 사용되며 저장되지 않습니다.", background="#0757a8", foreground="#dcecff", font=("Segoe UI", 10)).pack(anchor="w", pady=(3, 0))
+
+    setup = ttk.LabelFrame(app, text="설정", style="Card.TLabelframe", padding=14)
+    setup.grid(row=1, column=0, sticky="ew", pady=(12, 8))
+    setup.columnconfigure(1, weight=1)
+
+    active = ttk.LabelFrame(app, text="현재 작업", style="Card.TLabelframe", padding=14)
+    active.grid(row=2, column=0, sticky="ew", pady=8)
+    active.columnconfigure(1, weight=1)
+
+    history = ttk.LabelFrame(app, text="활동 기록", style="Card.TLabelframe", padding=10)
+    history.grid(row=3, column=0, sticky="nsew", pady=(8, 0))
+    history.columnconfigure(0, weight=1)
+    history.rowconfigure(0, weight=1)
 
     def add_field(row: int, label: str, variable: tk.StringVar, show: str | None = None) -> None:
-        ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=4)
-        ttk.Entry(frame, textvariable=variable, show=show, width=42).grid(row=row, column=1, sticky="ew", pady=4)
+        ttk.Label(setup, text=label).grid(row=row, column=0, sticky="w", padx=(0, 12), pady=4)
+        ttk.Entry(setup, textvariable=variable, show=show, width=42).grid(row=row, column=1, sticky="ew", pady=4)
 
     add_field(0, "API 토큰", token, "•")
     add_field(1, "애플리케이션 ID", application_id)
     add_field(2, "국가 ID", country_id)
     add_field(3, "국가 전화 코드 (예: +82)", country_calling_code)
-    ttk.Label(frame, text="사용 가능 번호").grid(row=4, column=0, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=availability, font=("Segoe UI", 11, "bold")).grid(row=4, column=1, sticky="w", pady=3)
-    ttk.Separator(frame).grid(row=5, column=0, columnspan=3, sticky="ew", pady=10)
+    ttk.Label(setup, text="사용 가능 번호").grid(row=4, column=0, sticky="w", padx=(0, 12), pady=4)
+    ttk.Label(setup, textvariable=availability, style="Result.TLabel").grid(row=4, column=1, sticky="w", pady=4)
 
-    ttk.Label(frame, text="번호").grid(row=6, column=0, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=number, font=("Segoe UI", 11, "bold")).grid(row=6, column=1, sticky="w", pady=3)
-    ttk.Label(frame, text="코드").grid(row=7, column=0, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=code, font=("Segoe UI", 11, "bold")).grid(row=7, column=1, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=status, wraplength=380).grid(row=8, column=0, columnspan=3, sticky="w", pady=(10, 6))
+    status_strip = tk.Label(active, textvariable=status, anchor="w", background="#e4f0ff", foreground="#173b61", font=("Segoe UI", 10), padx=10, pady=8)
+    status_strip.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 12))
+    ttk.Label(active, text="번호").grid(row=1, column=0, sticky="w", padx=(0, 12), pady=5)
+    ttk.Label(active, textvariable=number, style="Result.TLabel").grid(row=1, column=1, sticky="w", pady=5)
+    ttk.Label(active, text="코드").grid(row=2, column=0, sticky="w", padx=(0, 12), pady=5)
+    ttk.Label(active, textvariable=code, style="Code.TLabel").grid(row=2, column=1, sticky="w", pady=5)
 
-    buttons = ttk.Frame(frame)
-    buttons.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+    log = tk.Text(history, height=7, wrap="word", state="disabled", background="#f8fbff", foreground="#243447", relief="flat", font=("Consolas", 9))
+    log.grid(row=0, column=0, sticky="nsew")
+    scrollbar = ttk.Scrollbar(history, orient="vertical", command=log.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    log.configure(yscrollcommand=scrollbar.set)
+
+    def log_activity(message: str) -> None:
+        log.configure(state="normal")
+        log.insert("end", f"{time.strftime('%H:%M:%S')}  {message}\n")
+        log.see("end")
+        log.configure(state="disabled")
+
+    def clear_log() -> None:
+        log.configure(state="normal")
+        log.delete("1.0", "end")
+        log.configure(state="disabled")
 
     def begin() -> None:
         nonlocal poller
@@ -330,12 +373,14 @@ def main() -> None:
         start_button.configure(state="disabled")
         stop_button.configure(state="normal")
         reject_button.configure(state="normal")
+        log_activity("번호 발급을 시작했습니다.")
         poller.start()
 
     def stop() -> None:
         if poller:
             poller.stop()
         status.set("Stopped.")
+        log_activity("사용자가 작업을 중지했습니다.")
 
     def reject() -> None:
         if not poller or not poller.activation:
@@ -344,6 +389,7 @@ def main() -> None:
         try:
             poller.reject()
             status.set("Activation rejected.")
+            log_activity("현재 번호를 거절했습니다.")
         except ApiError as error:
             messagebox.showerror("SMS-Man 오류", str(error))
 
@@ -356,6 +402,7 @@ def main() -> None:
         root.clipboard_clear()
         root.clipboard_append(copied_number)
         status.set("국가 코드 제외 번호를 복사했습니다.")
+        log_activity("국가 코드 제외 번호를 복사했습니다.")
 
     def copy_code() -> None:
         if code.get() == "—":
@@ -363,6 +410,7 @@ def main() -> None:
         root.clipboard_clear()
         root.clipboard_append(code.get())
         status.set("SMS 코드를 복사했습니다.")
+        log_activity("SMS 코드를 복사했습니다.")
 
     def refresh_limits() -> None:
         try:
@@ -389,18 +437,19 @@ def main() -> None:
 
         threading.Thread(target=worker, name="sms-man-limits", daemon=True).start()
 
-    start_button = ttk.Button(buttons, text="시작", command=begin)
-    start_button.grid(row=0, column=0, padx=(0, 6))
-    stop_button = ttk.Button(buttons, text="중지", command=stop, state="disabled")
-    stop_button.grid(row=0, column=1, padx=6)
-    reject_button = ttk.Button(buttons, text="현재 번호 거절", command=reject, state="disabled")
-    reject_button.grid(row=0, column=2, padx=(6, 0))
-    refresh_button = ttk.Button(buttons, text="재고 새로고침", command=refresh_limits)
-    refresh_button.grid(row=0, column=3, padx=(6, 0))
-    copy_number_button = ttk.Button(frame, text="복사", command=copy_number_without_country_code, state="disabled")
-    copy_number_button.grid(row=6, column=2, padx=(6, 0))
-    copy_code_button = ttk.Button(frame, text="복사", command=copy_code, state="disabled")
-    copy_code_button.grid(row=7, column=2, padx=(6, 0))
+    start_button = ttk.Button(active, text="번호 발급 시작", command=begin, style="Primary.TButton")
+    start_button.grid(row=3, column=0, sticky="w", pady=(12, 0))
+    stop_button = ttk.Button(active, text="중지", command=stop, state="disabled")
+    stop_button.grid(row=3, column=1, sticky="w", padx=6, pady=(12, 0))
+    reject_button = ttk.Button(active, text="현재 번호 거절", command=reject, state="disabled")
+    reject_button.grid(row=3, column=2, sticky="e", padx=(6, 0), pady=(12, 0))
+    refresh_button = ttk.Button(setup, text="재고 새로고침", command=refresh_limits)
+    refresh_button.grid(row=4, column=2, padx=(12, 0))
+    copy_number_button = ttk.Button(active, text="복사", command=copy_number_without_country_code, state="disabled")
+    copy_number_button.grid(row=1, column=2, padx=(12, 0))
+    copy_code_button = ttk.Button(active, text="복사", command=copy_code, state="disabled")
+    copy_code_button.grid(row=2, column=2, padx=(12, 0))
+    ttk.Button(history, text="기록 지우기", command=clear_log).grid(row=1, column=0, sticky="e", pady=(8, 0))
 
     def consume_events() -> None:
         nonlocal poller
@@ -412,6 +461,7 @@ def main() -> None:
             if event == "number":
                 number.set(value)
                 copy_number_button.configure(state="normal")
+                log_activity(f"번호를 받았습니다: {value}")
             elif event == "limits":
                 availability.set(f"{value}개")
                 status.set("사용 가능 번호를 갱신했습니다.")
@@ -425,11 +475,13 @@ def main() -> None:
                 copy_code_button.configure(state="normal")
                 root.clipboard_clear()
                 root.clipboard_append(value)
+                log_activity("SMS 코드를 받았습니다.")
             elif event == "status":
                 status.set(value)
+                log_activity(value)
             elif event == "error":
                 status.set(f"오류: {value}")
-                messagebox.showerror("SMS-Man 오류", value)
+                log_activity(f"오류: {value}")
             elif event == "finished":
                 poller = None
                 start_button.configure(state="normal")
