@@ -75,7 +75,7 @@ ERROR_LABELS = {
     "not_enough_balance": "Insufficient SMS-Man balance",
     "wrong_token": "Invalid API token",
     "bad_token": "Invalid API token",
-    "wrong_service_id": "Invalid service ID",
+    "wrong_application_id": "Invalid application ID",
     "wrong_country_id": "Invalid country ID",
 }
 WAITING_SMS_CODES = {"wait_sms", "sms_not_found", "no_sms"}
@@ -83,12 +83,15 @@ WAITING_SMS_CODES = {"wait_sms", "sms_not_found", "no_sms"}
 
 def api_error(payload: dict[str, Any]) -> ApiError:
     code = str(payload.get("error_code") or payload.get("error") or "unknown_error").lower()
-    detail = str(payload.get("message") or ERROR_LABELS.get(code) or code.replace("_", " "))
-    return ApiError(detail[:200], retryable=code == "no_free_phones")
+    detail = payload.get("error_msg") or payload.get("message") or ERROR_LABELS.get(code) or code.replace("_", " ")
+    if isinstance(detail, dict):
+        detail = next((str(value) for value in detail.values()), code.replace("_", " "))
+    retryable = code == "no_free_phones" or str(detail).strip().casefold().rstrip(".") == "no numbers, try again"
+    return ApiError(detail[:200], retryable=retryable)
 
 
 def parse_get_number_response(payload: dict[str, Any]) -> Activation:
-    if payload.get("success") is not True:
+    if payload.get("success") is False or payload.get("error_code"):
         raise api_error(payload)
 
     request_id = payload.get("request_id") or payload.get("id")
@@ -99,10 +102,12 @@ def parse_get_number_response(payload: dict[str, Any]) -> Activation:
 
 
 def parse_get_sms_response(payload: dict[str, Any]) -> str | None:
-    if payload.get("success") is not True:
-        code = str(payload.get("error_code") or payload.get("error") or "").lower()
+    code = str(payload.get("error_code") or payload.get("error") or "").lower()
+    if code:
         if code in WAITING_SMS_CODES:
             return None
+        raise api_error(payload)
+    if payload.get("success") is False:
         raise api_error(payload)
 
     direct_code = payload.get("code") or payload.get("sms_code")
@@ -142,9 +147,9 @@ class SmsManClient:
             raise ApiError(f"SMS-Man HTTP {response.status_code}")
         return response.json()
 
-    def get_number(self, *, service_id: str, country_id: str) -> Activation:
+    def get_number(self, *, application_id: str, country_id: str) -> Activation:
         return parse_get_number_response(
-            self._get("get-number", service_id=service_id.strip(), country_id=country_id.strip())
+            self._get("get-number", application_id=application_id.strip(), country_id=country_id.strip())
         )
 
     def get_sms(self, request_id: str) -> str | None:
@@ -159,9 +164,9 @@ class SmsManClient:
 class Poller:
     """Obtains one activation, then polls it until a code arrives or it is stopped."""
 
-    def __init__(self, client: SmsManClient, service_id: str, country_id: str, events: queue.Queue[tuple[str, str]]) -> None:
+    def __init__(self, client: SmsManClient, application_id: str, country_id: str, events: queue.Queue[tuple[str, str]]) -> None:
         self.client = client
-        self.service_id = service_id
+        self.application_id = application_id
         self.country_id = country_id
         self.events = events
         self.stop_event = threading.Event()
@@ -188,7 +193,7 @@ class Poller:
                 self._emit("status", f"Requesting a phone number (attempt {attempts})…")
                 try:
                     self.activation = self.client.get_number(
-                        service_id=self.service_id, country_id=self.country_id
+                        application_id=self.application_id, country_id=self.country_id
                     )
                 except ApiError as error:
                     if not error.retryable:
@@ -224,11 +229,11 @@ def main() -> None:
     events: queue.Queue[tuple[str, str]] = queue.Queue()
     poller: Poller | None = None
     token = tk.StringVar()
-    service_id = tk.StringVar(value="297")
+    application_id = tk.StringVar(value="297")
     country_id = tk.StringVar(value="140")
     number = tk.StringVar(value="—")
     code = tk.StringVar(value="—")
-    status = tk.StringVar(value="API 토큰, 서비스 ID, 국가 ID를 입력하세요.")
+    status = tk.StringVar(value="API 토큰, 애플리케이션 ID, 국가 ID를 입력하세요.")
 
     frame = ttk.Frame(root, padding=16)
     frame.grid(sticky="nsew")
@@ -239,7 +244,7 @@ def main() -> None:
         ttk.Entry(frame, textvariable=variable, show=show, width=42).grid(row=row, column=1, sticky="ew", pady=4)
 
     add_field(0, "API 토큰", token, "•")
-    add_field(1, "서비스 ID", service_id)
+    add_field(1, "애플리케이션 ID", application_id)
     add_field(2, "국가 ID", country_id)
     ttk.Separator(frame).grid(row=3, column=0, columnspan=2, sticky="ew", pady=10)
 
@@ -257,13 +262,13 @@ def main() -> None:
         if poller:
             return
         try:
-            poller = Poller(SmsManClient(token.get()), service_id.get().strip(), country_id.get().strip(), events)
+            poller = Poller(SmsManClient(token.get()), application_id.get().strip(), country_id.get().strip(), events)
         except ValueError as error:
             messagebox.showerror("입력 오류", str(error))
             return
-        if not poller.service_id or not poller.country_id:
+        if not poller.application_id or not poller.country_id:
             poller = None
-            messagebox.showerror("입력 오류", "서비스 ID와 국가 ID는 필수입니다.")
+            messagebox.showerror("입력 오류", "애플리케이션 ID와 국가 ID는 필수입니다.")
             return
         number.set("—")
         code.set("—")
