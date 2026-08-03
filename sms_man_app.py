@@ -279,10 +279,10 @@ def main() -> None:
     style = ttk.Style(root)
     style.configure("App.TFrame", background="#eef4fb")
     style.configure("Card.TLabelframe", background="#ffffff", bordercolor="#cbd8e6", relief="solid")
-    style.configure("Card.TLabelframe.Label", background="#ffffff", foreground="#163a63", font=("Segoe UI", 11, "bold"))
+    style.configure("Card.TLabelframe.Label", font=("Segoe UI", 11, "bold"))
     style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"))
-    style.configure("Result.TLabel", font=("Segoe UI", 13, "bold"), foreground="#163a63", background="#ffffff")
-    style.configure("Code.TLabel", font=("Segoe UI", 20, "bold"), foreground="#0b6b3a", background="#ffffff")
+    style.configure("Result.TLabel", font=("Segoe UI", 13, "bold"), foreground="#163a63")
+    style.configure("Code.TLabel", font=("Segoe UI", 20, "bold"), foreground="#0b6b3a")
 
     events: queue.Queue[tuple[str, str]] = queue.Queue()
     poller: Poller | None = None
