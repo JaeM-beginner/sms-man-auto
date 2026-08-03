@@ -110,6 +110,16 @@ def parse_limits_response(payload: dict[str, Any]) -> int:
         raise ApiError("SMS-Man limits response did not include an available number count") from error
 
 
+def strip_country_code(phone_number: str, country_code: str) -> str:
+    number_digits = re.sub(r"\D", "", phone_number)
+    code_digits = re.sub(r"\D", "", country_code)
+    if not code_digits:
+        raise ApiError("Enter the country calling code, for example +82")
+    if not number_digits.startswith(code_digits) or len(number_digits) == len(code_digits):
+        raise ApiError("The phone number does not start with the entered country calling code")
+    return number_digits[len(code_digits) :]
+
+
 def parse_get_sms_response(payload: dict[str, Any]) -> str | None:
     code = str(payload.get("error_code") or payload.get("error") or "").lower()
     if code:
@@ -186,11 +196,20 @@ class SmsManClient:
 class Poller:
     """Obtains one activation, then polls it until a code arrives or it is stopped."""
 
-    def __init__(self, client: SmsManClient, application_id: str, country_id: str, events: queue.Queue[tuple[str, str]]) -> None:
+    def __init__(
+        self,
+        client: SmsManClient,
+        application_id: str,
+        country_id: str,
+        events: queue.Queue[tuple[str, str]],
+        *,
+        sms_timeout: float = 120,
+    ) -> None:
         self.client = client
         self.application_id = application_id
         self.country_id = country_id
         self.events = events
+        self.sms_timeout = sms_timeout
         self.stop_event = threading.Event()
         self.activation: Activation | None = None
 
@@ -210,29 +229,36 @@ class Poller:
     def _run(self) -> None:
         try:
             attempts = 0
-            while not self.stop_event.is_set() and self.activation is None:
-                attempts += 1
-                self._emit("status", f"Requesting a phone number (attempt {attempts})…")
-                try:
-                    self.activation = self.client.get_number(
-                        application_id=self.application_id, country_id=self.country_id
-                    )
-                except ApiError as error:
-                    if not error.retryable:
-                        raise
-                    self._emit("status", f"No number available (attempt {attempts}); retrying in 3 seconds…")
-                    self.stop_event.wait(3)
-            if self.activation is None:
-                return
-            self._emit("number", self.activation.phone_number)
-            self._emit("status", f"Number acquired. Waiting for SMS (activation {self.activation.request_id})…")
-            while not self.stop_event.wait(3):
-                code = self.client.get_sms(self.activation.request_id)
-                if code:
-                    self._emit("code", code)
-                    self._emit("status", "SMS code received.")
+            while not self.stop_event.is_set():
+                while not self.stop_event.is_set() and self.activation is None:
+                    attempts += 1
+                    self._emit("status", f"Requesting a phone number (attempt {attempts})…")
+                    try:
+                        self.activation = self.client.get_number(
+                            application_id=self.application_id, country_id=self.country_id
+                        )
+                    except ApiError as error:
+                        if not error.retryable:
+                            raise
+                        self._emit("status", f"No number available (attempt {attempts}); retrying in 3 seconds…")
+                        self.stop_event.wait(3)
+                if self.activation is None:
                     return
-                self._emit("status", "Waiting for SMS…")
+                self._emit("number", self.activation.phone_number)
+                self._emit("status", f"Number acquired. Waiting for SMS (activation {self.activation.request_id})…")
+                started_at = time.monotonic()
+                while not self.stop_event.wait(3):
+                    code = self.client.get_sms(self.activation.request_id)
+                    if code:
+                        self._emit("code", code)
+                        self._emit("status", "SMS code received.")
+                        return
+                    if time.monotonic() - started_at >= self.sms_timeout:
+                        self._emit("status", "No SMS after 2 minutes; rejecting this number and requesting another…")
+                        self.client.set_status(self.activation.request_id, "reject")
+                        self.activation = None
+                        break
+                    self._emit("status", "Waiting for SMS…")
         except (ApiError, ValueError) as error:
             self._emit("error", str(error))
         finally:
@@ -253,6 +279,7 @@ def main() -> None:
     token = tk.StringVar()
     application_id = tk.StringVar(value="297")
     country_id = tk.StringVar(value="140")
+    country_calling_code = tk.StringVar()
     availability = tk.StringVar(value="—")
     number = tk.StringVar(value="—")
     code = tk.StringVar(value="—")
@@ -269,18 +296,19 @@ def main() -> None:
     add_field(0, "API 토큰", token, "•")
     add_field(1, "애플리케이션 ID", application_id)
     add_field(2, "국가 ID", country_id)
-    ttk.Label(frame, text="사용 가능 번호").grid(row=3, column=0, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=availability, font=("Segoe UI", 11, "bold")).grid(row=3, column=1, sticky="w", pady=3)
-    ttk.Separator(frame).grid(row=4, column=0, columnspan=2, sticky="ew", pady=10)
+    add_field(3, "국가 전화 코드 (예: +82)", country_calling_code)
+    ttk.Label(frame, text="사용 가능 번호").grid(row=4, column=0, sticky="w", pady=3)
+    ttk.Label(frame, textvariable=availability, font=("Segoe UI", 11, "bold")).grid(row=4, column=1, sticky="w", pady=3)
+    ttk.Separator(frame).grid(row=5, column=0, columnspan=3, sticky="ew", pady=10)
 
-    ttk.Label(frame, text="번호").grid(row=5, column=0, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=number, font=("Segoe UI", 11, "bold")).grid(row=5, column=1, sticky="w", pady=3)
-    ttk.Label(frame, text="코드").grid(row=6, column=0, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=code, font=("Segoe UI", 11, "bold")).grid(row=6, column=1, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=status, wraplength=380).grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 6))
+    ttk.Label(frame, text="번호").grid(row=6, column=0, sticky="w", pady=3)
+    ttk.Label(frame, textvariable=number, font=("Segoe UI", 11, "bold")).grid(row=6, column=1, sticky="w", pady=3)
+    ttk.Label(frame, text="코드").grid(row=7, column=0, sticky="w", pady=3)
+    ttk.Label(frame, textvariable=code, font=("Segoe UI", 11, "bold")).grid(row=7, column=1, sticky="w", pady=3)
+    ttk.Label(frame, textvariable=status, wraplength=380).grid(row=8, column=0, columnspan=3, sticky="w", pady=(10, 6))
 
     buttons = ttk.Frame(frame)
-    buttons.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+    buttons.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(6, 0))
 
     def begin() -> None:
         nonlocal poller
@@ -297,6 +325,8 @@ def main() -> None:
             return
         number.set("—")
         code.set("—")
+        copy_number_button.configure(state="disabled")
+        copy_code_button.configure(state="disabled")
         start_button.configure(state="disabled")
         stop_button.configure(state="normal")
         reject_button.configure(state="normal")
@@ -316,6 +346,23 @@ def main() -> None:
             status.set("Activation rejected.")
         except ApiError as error:
             messagebox.showerror("SMS-Man 오류", str(error))
+
+    def copy_number_without_country_code() -> None:
+        try:
+            copied_number = strip_country_code(number.get(), country_calling_code.get())
+        except ApiError as error:
+            messagebox.showerror("복사 오류", str(error))
+            return
+        root.clipboard_clear()
+        root.clipboard_append(copied_number)
+        status.set("국가 코드 제외 번호를 복사했습니다.")
+
+    def copy_code() -> None:
+        if code.get() == "—":
+            return
+        root.clipboard_clear()
+        root.clipboard_append(code.get())
+        status.set("SMS 코드를 복사했습니다.")
 
     def refresh_limits() -> None:
         try:
@@ -350,6 +397,10 @@ def main() -> None:
     reject_button.grid(row=0, column=2, padx=(6, 0))
     refresh_button = ttk.Button(buttons, text="재고 새로고침", command=refresh_limits)
     refresh_button.grid(row=0, column=3, padx=(6, 0))
+    copy_number_button = ttk.Button(frame, text="복사", command=copy_number_without_country_code, state="disabled")
+    copy_number_button.grid(row=6, column=2, padx=(6, 0))
+    copy_code_button = ttk.Button(frame, text="복사", command=copy_code, state="disabled")
+    copy_code_button.grid(row=7, column=2, padx=(6, 0))
 
     def consume_events() -> None:
         nonlocal poller
@@ -360,6 +411,7 @@ def main() -> None:
                 break
             if event == "number":
                 number.set(value)
+                copy_number_button.configure(state="normal")
             elif event == "limits":
                 availability.set(f"{value}개")
                 status.set("사용 가능 번호를 갱신했습니다.")
@@ -370,6 +422,7 @@ def main() -> None:
                 refresh_button.configure(state="normal")
             elif event == "code":
                 code.set(value)
+                copy_code_button.configure(state="normal")
                 root.clipboard_clear()
                 root.clipboard_append(value)
             elif event == "status":

@@ -1,10 +1,14 @@
+import queue
 import unittest
 from unittest.mock import Mock
 
 from sms_man_app import (
     ApiError,
+    Activation,
     HttpResponse,
+    Poller,
     SmsManClient,
+    strip_country_code,
     parse_get_number_response,
     parse_limits_response,
     parse_get_sms_response,
@@ -34,6 +38,9 @@ class ParseResponseTests(unittest.TestCase):
 
     def test_parses_available_number_count_from_limits_response(self):
         self.assertEqual(parse_limits_response({"count": "17"}), 17)
+
+    def test_strips_explicit_country_code_from_phone_number(self):
+        self.assertEqual(strip_country_code("+82 10-1234-5678", "+82"), "1012345678")
 
     def test_parses_code_from_first_sms_message(self):
         self.assertEqual(
@@ -111,6 +118,23 @@ class ClientTests(unittest.TestCase):
             params={"token": "secret", "request_id": "55", "status": "reject"},
             timeout=15.0,
         )
+
+class PollerTests(unittest.TestCase):
+    def test_rejects_timed_out_number_before_requesting_another(self):
+        client = Mock()
+        first = Activation(request_id="first", phone_number="821011111111")
+        second = Activation(request_id="second", phone_number="821022222222")
+        client.get_number.side_effect = [first, second]
+        client.get_sms.side_effect = [None, "483921"]
+        events: queue.Queue[tuple[str, str]] = queue.Queue()
+        poller = Poller(client, "297", "140", events, sms_timeout=0)
+        poller.stop_event.wait = Mock(return_value=False)
+
+        poller._run()
+
+        client.set_status.assert_called_once_with("first", "reject")
+        self.assertEqual(client.get_number.call_count, 2)
+        self.assertIn(("code", "483921"), list(events.queue))
 
 
 def fake_response(payload):
