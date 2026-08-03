@@ -83,12 +83,16 @@ WAITING_SMS_CODES = {"wait_sms", "sms_not_found", "no_sms"}
 
 def api_error(payload: dict[str, Any]) -> ApiError:
     code = str(payload.get("error_code") or payload.get("error") or "unknown_error").lower()
-    detail = str(payload.get("message") or ERROR_LABELS.get(code) or code.replace("_", " "))
+    raw_detail = payload.get("error_msg") or payload.get("message") or ERROR_LABELS.get(code)
+    if isinstance(raw_detail, dict):
+        detail = "; ".join(f"{key}: {value}" for key, value in raw_detail.items())
+    else:
+        detail = str(raw_detail or code.replace("_", " "))
     return ApiError(detail[:200], retryable=code == "no_free_phones")
 
 
 def parse_get_number_response(payload: dict[str, Any]) -> Activation:
-    if payload.get("success") is not True:
+    if payload.get("success") is False or payload.get("error_code") or payload.get("error"):
         raise api_error(payload)
 
     request_id = payload.get("request_id") or payload.get("id")
@@ -99,10 +103,10 @@ def parse_get_number_response(payload: dict[str, Any]) -> Activation:
 
 
 def parse_get_sms_response(payload: dict[str, Any]) -> str | None:
-    if payload.get("success") is not True:
-        code = str(payload.get("error_code") or payload.get("error") or "").lower()
-        if code in WAITING_SMS_CODES:
-            return None
+    error_code = str(payload.get("error_code") or payload.get("error") or "").lower()
+    if error_code in WAITING_SMS_CODES:
+        return None
+    if payload.get("success") is False or error_code:
         raise api_error(payload)
 
     direct_code = payload.get("code") or payload.get("sms_code")
@@ -139,12 +143,20 @@ class SmsManClient:
             timeout=self.timeout,
         )
         if response.status_code != 200:
-            raise ApiError(f"SMS-Man HTTP {response.status_code}")
+            message = f"SMS-Man HTTP {response.status_code}"
+            body = getattr(response, "body", "").strip()
+            if body:
+                try:
+                    detail = str(api_error(response.json()))
+                except ApiError:
+                    detail = " ".join(body.split())[:200]
+                message = f"{message}: {detail}"
+            raise ApiError(message)
         return response.json()
 
     def get_number(self, *, service_id: str, country_id: str) -> Activation:
         return parse_get_number_response(
-            self._get("get-number", service_id=service_id.strip(), country_id=country_id.strip())
+            self._get("get-number", application_id=service_id.strip(), country_id=country_id.strip())
         )
 
     def get_sms(self, request_id: str) -> str | None:
