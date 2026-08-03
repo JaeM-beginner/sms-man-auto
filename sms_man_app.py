@@ -101,6 +101,15 @@ def parse_get_number_response(payload: dict[str, Any]) -> Activation:
     return Activation(request_id=str(request_id), phone_number=str(phone_number))
 
 
+def parse_limits_response(payload: dict[str, Any]) -> int:
+    if payload.get("success") is False or payload.get("error_code"):
+        raise api_error(payload)
+    try:
+        return int(payload["count"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ApiError("SMS-Man limits response did not include an available number count") from error
+
+
 def parse_get_sms_response(payload: dict[str, Any]) -> str | None:
     code = str(payload.get("error_code") or payload.get("error") or "").lower()
     if code:
@@ -158,6 +167,11 @@ class SmsManClient:
     def get_number(self, *, application_id: str, country_id: str) -> Activation:
         return parse_get_number_response(
             self._get("get-number", application_id=application_id.strip(), country_id=country_id.strip())
+        )
+
+    def get_limits(self, *, application_id: str, country_id: str) -> int:
+        return parse_limits_response(
+            self._get("limits", application_id=application_id.strip(), country_id=country_id.strip())
         )
 
     def get_sms(self, request_id: str) -> str | None:
@@ -239,6 +253,7 @@ def main() -> None:
     token = tk.StringVar()
     application_id = tk.StringVar(value="297")
     country_id = tk.StringVar(value="140")
+    availability = tk.StringVar(value="—")
     number = tk.StringVar(value="—")
     code = tk.StringVar(value="—")
     status = tk.StringVar(value="API 토큰, 애플리케이션 ID, 국가 ID를 입력하세요.")
@@ -254,16 +269,18 @@ def main() -> None:
     add_field(0, "API 토큰", token, "•")
     add_field(1, "애플리케이션 ID", application_id)
     add_field(2, "국가 ID", country_id)
-    ttk.Separator(frame).grid(row=3, column=0, columnspan=2, sticky="ew", pady=10)
+    ttk.Label(frame, text="사용 가능 번호").grid(row=3, column=0, sticky="w", pady=3)
+    ttk.Label(frame, textvariable=availability, font=("Segoe UI", 11, "bold")).grid(row=3, column=1, sticky="w", pady=3)
+    ttk.Separator(frame).grid(row=4, column=0, columnspan=2, sticky="ew", pady=10)
 
-    ttk.Label(frame, text="번호").grid(row=4, column=0, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=number, font=("Segoe UI", 11, "bold")).grid(row=4, column=1, sticky="w", pady=3)
-    ttk.Label(frame, text="코드").grid(row=5, column=0, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=code, font=("Segoe UI", 11, "bold")).grid(row=5, column=1, sticky="w", pady=3)
-    ttk.Label(frame, textvariable=status, wraplength=380).grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 6))
+    ttk.Label(frame, text="번호").grid(row=5, column=0, sticky="w", pady=3)
+    ttk.Label(frame, textvariable=number, font=("Segoe UI", 11, "bold")).grid(row=5, column=1, sticky="w", pady=3)
+    ttk.Label(frame, text="코드").grid(row=6, column=0, sticky="w", pady=3)
+    ttk.Label(frame, textvariable=code, font=("Segoe UI", 11, "bold")).grid(row=6, column=1, sticky="w", pady=3)
+    ttk.Label(frame, textvariable=status, wraplength=380).grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 6))
 
     buttons = ttk.Frame(frame)
-    buttons.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+    buttons.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(6, 0))
 
     def begin() -> None:
         nonlocal poller
@@ -300,12 +317,39 @@ def main() -> None:
         except ApiError as error:
             messagebox.showerror("SMS-Man 오류", str(error))
 
+    def refresh_limits() -> None:
+        try:
+            client = SmsManClient(token.get())
+        except ValueError as error:
+            messagebox.showerror("입력 오류", str(error))
+            return
+        application = application_id.get().strip()
+        country = country_id.get().strip()
+        if not application or not country:
+            messagebox.showerror("입력 오류", "애플리케이션 ID와 국가 ID는 필수입니다.")
+            return
+
+        refresh_button.configure(state="disabled")
+        status.set("사용 가능 번호를 조회하는 중…")
+
+        def worker() -> None:
+            try:
+                events.put(("limits", str(client.get_limits(application_id=application, country_id=country))))
+            except ApiError as error:
+                events.put(("limits_error", str(error)))
+            finally:
+                events.put(("limits_finished", ""))
+
+        threading.Thread(target=worker, name="sms-man-limits", daemon=True).start()
+
     start_button = ttk.Button(buttons, text="시작", command=begin)
     start_button.grid(row=0, column=0, padx=(0, 6))
     stop_button = ttk.Button(buttons, text="중지", command=stop, state="disabled")
     stop_button.grid(row=0, column=1, padx=6)
     reject_button = ttk.Button(buttons, text="현재 번호 거절", command=reject, state="disabled")
     reject_button.grid(row=0, column=2, padx=(6, 0))
+    refresh_button = ttk.Button(buttons, text="재고 새로고침", command=refresh_limits)
+    refresh_button.grid(row=0, column=3, padx=(6, 0))
 
     def consume_events() -> None:
         nonlocal poller
@@ -316,6 +360,14 @@ def main() -> None:
                 break
             if event == "number":
                 number.set(value)
+            elif event == "limits":
+                availability.set(f"{value}개")
+                status.set("사용 가능 번호를 갱신했습니다.")
+            elif event == "limits_error":
+                status.set(f"재고 조회 오류: {value}")
+                messagebox.showerror("SMS-Man 오류", value)
+            elif event == "limits_finished":
+                refresh_button.configure(state="normal")
             elif event == "code":
                 code.set(value)
                 root.clipboard_clear()

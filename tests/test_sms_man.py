@@ -1,7 +1,14 @@
 import unittest
 from unittest.mock import Mock
 
-from sms_man_app import ApiError, HttpResponse, SmsManClient, parse_get_number_response, parse_get_sms_response
+from sms_man_app import (
+    ApiError,
+    HttpResponse,
+    SmsManClient,
+    parse_get_number_response,
+    parse_limits_response,
+    parse_get_sms_response,
+)
 
 
 class ParseResponseTests(unittest.TestCase):
@@ -24,6 +31,9 @@ class ParseResponseTests(unittest.TestCase):
             parse_get_number_response({"success": False, "error_msg": "No Numbers, try again."})
 
         self.assertTrue(raised.exception.retryable)
+
+    def test_parses_available_number_count_from_limits_response(self):
+        self.assertEqual(parse_limits_response({"count": "17"}), 17)
 
     def test_parses_code_from_first_sms_message(self):
         self.assertEqual(
@@ -62,6 +72,18 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(activation.request_id, "55")
         session.get.assert_called_once_with(
             "https://api.sms-man.com/control/get-number",
+            params={"token": "secret", "application_id": "297", "country_id": "140"},
+            timeout=15.0,
+        )
+
+    def test_get_limits_uses_country_and_application_parameters(self):
+        session = Mock()
+        session.get.return_value = fake_response({"count": 17})
+        client = SmsManClient("secret", session=session)
+
+        self.assertEqual(client.get_limits(application_id="297", country_id="140"), 17)
+        session.get.assert_called_once_with(
+            "https://api.sms-man.com/control/limits",
             params={"token": "secret", "application_id": "297", "country_id": "140"},
             timeout=15.0,
         )
