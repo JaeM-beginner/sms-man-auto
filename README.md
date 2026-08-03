@@ -10,7 +10,7 @@ third-party websites or bypass CAPTCHAs.
 
 ## Features
 
-- API token, service ID, and country ID inputs
+- API token, service/application ID, and country ID inputs
 - One activation at a time (avoids duplicate purchases)
 - Retry every 3 seconds only for `no_free_phones`
 - Background network polling so the UI stays responsive
@@ -32,7 +32,7 @@ No third-party Python package is required.
 py -3.12 sms_man_app.py
 ```
 
-Enter the API token, service ID, and country ID, then select **시작**. Select
+Enter the API token, service/application ID, and country ID, then select **시작**. Select
 **중지** to stop future requests. Select **현재 번호 거절** to send
 `status=reject` for the activation currently displayed.
 
