@@ -1,51 +1,54 @@
-# SMS-Man Auto
+# SMS-Man Auto · 0.2.0-rc1
 
-Windows desktop client for **your own SMS-Man API account**. It requests one
-activation, retries conservatively when no number is available, polls the
-activation for an SMS code, copies a received code to the clipboard, and can
-reject the active number.
+사용자 자신의 SMS-Man API 계정으로 번호를 발급하고 SMS를 확인하는 **비공식 Windows 로컬 앱**입니다. 현재 배포 후보이며 공개 출시 승인 전입니다.
 
-It communicates only with SMS-Man's API endpoints; it does not automate
-third-party websites or bypass CAPTCHAs.
+## 실행
 
-## Features
+Python 3.12 이상과 Tcl/Tk가 필요합니다. 저장소 전체를 받은 후 해당 폴더에서 실행하세요.
 
-- API token, application ID, and country ID inputs
-- One activation at a time (avoids duplicate purchases)
-- Retry every 3 seconds only for `no_free_phones`
-- Background network polling so the UI stays responsive
-- Displayed phone number and SMS code; received code is copied to clipboard
-- `reject` status action for the active activation
-- No API token is written to disk
-
-## Requirements
-
-- Windows with Python 3.12+ **including Tcl/Tk** (the official python.org
-  installer includes it)
-- An SMS-Man account, API token, application ID, and country ID
-
-No third-party Python package is required.
-
-## Run
-
-```bash
+```powershell
 py -3.12 sms_man_app.py
-```
-
-Enter the API token, application ID, and country ID, then select **시작**. Select
-**중지** to stop future requests. Select **현재 번호 거절** to send
-`status=reject` for the activation currently displayed.
-
-The client uses these API paths by default:
-
-- `https://api.sms-man.com/control/get-number`
-- `https://api.sms-man.com/control/get-sms`
-- `https://api.sms-man.com/control/set-status`
-
-## Tests
-
-```bash
 py -3.12 -m unittest discover -s tests -v
 ```
 
-Tests use fake HTTP sessions and never call SMS-Man or require a token.
+외부 런타임 Python 패키지는 필요하지 않습니다. 현재 제공 형태는 소스 실행입니다. Python 없는 PC용 EXE는 아직 만들거나 검증하지 않았습니다.
+
+## 사용과 비용
+
+1. 자신의 API 토큰, 국가·서비스 ID, 단가 상한과 통화를 입력합니다. 국가 0(무작위)은 지원하지 않습니다.
+2. 공식 문서가 maxPrice를 Integer로 정의하여 **양의 정수 금액만 허용**합니다. 실제 통화별 금액 단위와 가격 상한 강제 여부는 제공자 검증 전입니다.
+3. 자동 재발급은 기본 OFF입니다. ON이면 최대 발급 수를 1~5회로 설정합니다.
+4. 구매 확인창의 ID·통화·단가·최대 횟수를 확인합니다. SMS-Man 잔액이 사용됩니다.
+5. 재고 없음은 최대 20번 요청, 3초 간격입니다. 실행은 600초, 번호별 SMS 대기는 120초입니다. 진행 중인 요청·번호 정리에는 추가 시간이 걸릴 수 있습니다.
+6. SMS 수신 성공 뒤에는 자동으로 다음 번호를 구매하지 않습니다.
+
+단가 × 횟수는 수수료·환율·다른 앱의 사용료를 포함하는 보장 총액이 아닙니다. 조회 재고와 실제 발급 가능 여부는 다를 수 있습니다. 취소·환불은 SMS-Man 정책에 따릅니다.
+
+## 중지·거절·결과 불명
+
+- 중지/거절은 신규 요청을 막고 진행 중인 요청의 응답까지 확인한 뒤 미사용 번호 거절을 시도합니다.
+- 응답 유실 또는 취소 실패 시 **UNRESOLVED**가 되어 새 구매를 차단합니다.
+- 활성 ID가 있으면 번호 정리를 재시도할 수 있습니다. ID가 없거나 해결되지 않으면 SMS-Man 계정에서 직접 확인하세요.
+- “계정에서 해결 확인”은 서버 취소 명령이 아닙니다. 실제 확인·정리 후에만 선택하세요.
+- 창 종료 시 정리를 기다리며 약 20초 뒤 강제 종료 여부를 안내합니다. 강제 종료·OS 종료·충돌 후 서버 번호 취소나 자동 복구는 보장하지 않습니다.
+- 성공한 번호에 used/close를 임의 전송하지 않습니다. 제공자 측 완료 처리 요구사항은 출시 전 확인해야 합니다.
+
+## 정보 보호
+
+토큰은 SMS-Man API 요청에 사용되며 앱에서 파일에 저장하지 않습니다. 번호·SMS·코드도 파일에 저장하지 않습니다. 활동 기록은 메모리에만 최근 500행, 번호는 마스킹, 코드와 토큰은 기록하지 않습니다.
+
+코드는 기본 수동 복사입니다. 자동 복사는 선택 사항입니다. “민감정보 지우기”는 유휴 상태에서 토큰·표시 결과·활동 기록을 지우고, 앱이 마지막으로 복사한 값과 현재 클립보드가 같을 때만 해당 값을 지웁니다. OS 클립보드 기록·동기화·메모리 덤프의 완전 삭제는 보장하지 않습니다.
+
+## 안내와 검증 상태
+
+앱 하단 도움말에서 동봉 문서를 읽을 수 있습니다.
+
+- [개인정보 안내](PRIVACY.md)
+- [지원·문의](SUPPORT.md)
+- [보안 신고](SECURITY.md)
+- [이용조건 초안](TERMS.md)
+- [제3자 구성요소](THIRD_PARTY_NOTICES.md)
+- [배포 체크리스트](RELEASE.md)
+- [API 계약 확인 기록](docs/API_CONTRACT.md)
+
+문의처는 [ljm1327@gmail.com](mailto:ljm1327@gmail.com)입니다. 소스 코드는 [MIT 라이선스](LICENSE)를 따릅니다. 사용자가 실제 사용에서 문제가 없었다고 보고했으며, Windows UI 및 유료 API의 세부 검증 기록은 추가 확인이 필요합니다. 자세한 상태는 RELEASE.md를 확인하세요.
