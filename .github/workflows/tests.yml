@@ -1,0 +1,21 @@
+name: Windows regression tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile
+        run: python -m compileall -q sms_api.py sms_engine.py sms_ui.py sms_man_app.py
+      - name: Unit and Tk tests (fake API only)
+        env:
+          SMS_MAN_REQUIRE_GUI: '1'
+        run: python -m unittest discover -s tests -v
